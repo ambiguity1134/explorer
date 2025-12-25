@@ -51,6 +51,18 @@
         button:hover { background: #ddd; }
         button.active { background: #4caf50; color: white; border-color: #4caf50; }
         
+		button#pauseBtn.active { 
+			background: #ffa000; 
+			color: white; 
+			border-color: #e68a00; 
+		}
+
+		button#stopBtn.active { 
+			background: #d32f2f; 
+			color: white; 
+			border-color: #b71c1c; 
+		}
+		
         input[type="number"], input[type="text"] {
             background: #fff;
             border: 1px solid #ccc;
@@ -265,7 +277,7 @@
             </div>
         </div>
 
-        <div class="status-bar" id="status">ready</div>
+        <div class="status-bar" id="status"></div>
 		
 		<div class="notes-wrapper">
 			<button id="notesToggle">notepad▾</button>
@@ -541,6 +553,12 @@ function playNote(midi, time, dur) {
     osc.stop(time + dur + 0.6);
 }
 
+function clearButtonStates() {
+    document.getElementById('playBtn').classList.remove('active');
+    document.getElementById('pauseBtn').classList.remove('active');
+    document.getElementById('stopBtn').classList.remove('active');
+}
+
 function startPlayback() {
     if (isPlaying) stopPlayback();
     if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -550,11 +568,13 @@ function startPlayback() {
     isPlaying = true; 
     currentEventIndex = 0;
     nextNoteTime = audioCtx.currentTime + 0.1;
+	
+	clearButtonStates();
+    document.getElementById('playBtn').classList.add('active');
     updateStatus("playing...", "#4caf50");
     
     schedulerID = requestAnimationFrame(scheduler);
     visualID = requestAnimationFrame(visualizer);
-    document.getElementById('playBtn').classList.add('active');
 }
 
 function scheduler() {
@@ -597,8 +617,10 @@ function stopPlayback() {
     isPlaying = false;
     cancelAnimationFrame(schedulerID); cancelAnimationFrame(visualID);
     document.getElementById('playBtn').classList.remove('active');
-    updateStatus("stopped");
-    ['1','2','3'].forEach(id => document.getElementById('backdrop'+id).innerHTML = document.getElementById('track'+id).value);
+	clearButtonStates();
+    document.getElementById('stopBtn').classList.add('active');
+    updateStatus("stopped.", "#d32f2f");    
+	['1','2','3'].forEach(id => document.getElementById('backdrop'+id).innerHTML = document.getElementById('track'+id).value);
 }
 
 // --- IMPROVED LIVE PREVIEW LOGIC ---
@@ -644,26 +666,31 @@ function livePreview(trackId, textarea, inputType) {
     }
 }
 
-// --- UPDATED EVENT LISTENERS ---
 ['1', '2', '3'].forEach(id => {
     const el = document.getElementById('track' + id);
     
     el.addEventListener('input', (e) => {
-        // Update syntax highlighting
+        const now = new Date();
+        const hours = String(now.getHours()).padStart(2, '0');
+        const mins = String(now.getMinutes()).padStart(2, '0');
+        const timeString = `${hours}:${mins}`;
+
         document.getElementById('backdrop' + id).innerHTML = e.target.value;
-        updateStatus("modified");
         
-        // Trigger live preview with inputType check
+        updateStatus(`last modified: ${timeString}`);
+        
         livePreview(id, e.target, e.inputType);
     });
 
     el.addEventListener('scroll', () => syncScroll(id));
 });
 
-document.getElementById('pauseBtn').onclick = () => { isPlaying = false; updateStatus("Paused", "#ffa000"); };
-document.getElementById('track1').addEventListener('input', () => updateStatus("modified"));
-document.getElementById('track2').addEventListener('input', () => updateStatus("modified"));
-document.getElementById('track3').addEventListener('input', () => updateStatus("modified"));
+document.getElementById('pauseBtn').onclick = () => { 
+    isPlaying = false; 
+    clearButtonStates();
+    document.getElementById('pauseBtn').classList.add('active');
+    updateStatus("paused—", "#ffa000"); 
+};
 
 ['1','2','3'].forEach(id => {
     document.getElementById('track'+id).addEventListener('input', e => document.getElementById('backdrop'+id).innerHTML = e.target.value);
