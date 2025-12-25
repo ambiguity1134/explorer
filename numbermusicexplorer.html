@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>numerical music explorer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #ffffff;
+            color: #000000;
+            font-family: 'Ubuntu Mono', monospace;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            align-items: center;
+            flex-wrap: wrap;
+            background: #f9f9f9;
+        }
+
+        button {
+            background: #eee;
+            color: #000;
+            border: 1px solid #999;
+            padding: 6px 12px;
+            font-family: inherit;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+
+        button:hover { background: #ddd; }
+        button.active { background: #4caf50; color: white; border-color: #4caf50; }
+        
+        input[type="number"], input[type="text"] {
+            background: #fff;
+            border: 1px solid #ccc;
+            color: #000;
+            padding: 6px;
+            font-family: inherit;
+            border-radius: 3px;
+        }
+
+        .track-wrapper {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .track-label {
+            font-size: 0.9rem;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .editor-container {
+            position: relative;
+            width: 100%;
+            border: 1px solid #333;
+            background: #fff;
+        }
+
+        .editor-backdrop, .editor-textarea {
+            width: 100%;
+            min-height: 60px;
+            margin: 0;
+            padding: 8px;
+            box-sizing: border-box;
+            font-family: 'Ubuntu Mono', monospace;
+            font-size: 16px;
+            line-height: 1.2;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow: auto;
+        }
+
+        .editor-backdrop {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            color: transparent;
+            pointer-events: none;
+            background: transparent;
+            border: none;
+            scrollbar-width: none; 
+        }
+        .editor-backdrop::-webkit-scrollbar { display: none; }
+
+        .editor-textarea {
+            position: relative;
+            z-index: 2;
+            background: transparent;
+            color: black;
+            resize: vertical;
+            outline: none;
+            display: block;
+            border: none;
+        }
+
+        .editor-textarea:focus {
+            box-shadow: inset 0 0 0 1px #4caf50;
+        }
+
+        mark {
+            background-color: #a5d6a7;
+            color: transparent;
+            border-radius: 2px;
+        }
+
+        .status-bar {
+            font-size: 0.85em;
+            color: #666;
+            height: 1.5em;
+            font-weight: bold;
+            transition: color 0.2s;
+        }
+        
+        .midi-group {
+            margin-left: auto;
+            display: flex;
+            gap: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="controls">
+            <button id="playBtn" title="Ctrl+Enter">play</button>
+            <button id="pauseBtn">pause</button>
+            <button id="stopBtn">stop</button>
+            <button id="repeatBtn">repeat: off</button>
+            <label>bpm: <input type="number" id="bpm" value="120" style="width: 50px;"></label>
+            
+            <div class="midi-group">
+                <input type="text" id="filename" value="" placeholder="filename">
+                <button id="exportBtn">export midi</button>
+            </div>
+        </div>
+
+        <div class="track-wrapper">
+            <div class="track-label">1=C5</div>
+            <div class="editor-container">
+                <div class="editor-backdrop" id="backdrop1"></div>
+                <textarea class="editor-textarea" id="track1" spellcheck="false" onscroll="syncScroll('1')"></textarea>
+            </div>
+        </div>
+
+        <div class="track-wrapper">
+            <div class="track-label">1=C4</div>
+            <div class="editor-container">
+                <div class="editor-backdrop" id="backdrop2"></div>
+                <textarea class="editor-textarea" id="track2" spellcheck="false" onscroll="syncScroll('2')"></textarea>
+            </div>
+        </div>
+
+        <div class="track-wrapper">
+            <div class="track-label">1=C3</div>
+            <div class="editor-container">
+                <div class="editor-backdrop" id="backdrop3"></div>
+                <textarea class="editor-textarea" id="track3" spellcheck="false" onscroll="syncScroll('3')"></textarea>
+            </div>
+        </div>
+
+        <div class="status-bar" id="status">ready</div>
+    </div>
+
+<script>
+const NOTES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+const MAJOR_SCALE_INTERVALS = [0, 2, 4, 5, 7, 9, 11]; 
+const BASE_MIDI = { top: 72, mid: 60, bot: 48 };
+
+function updateStatus(msg, color = "#666") {
+    const el = document.getElementById('status');
+    el.innerText = msg;
+    el.style.color = color;
+}
+
+function syncScroll(id) {
+    const ta = document.getElementById('track' + id);
+    const bd = document.getElementById('backdrop' + id);
+    bd.scrollTop = ta.scrollTop;
+    bd.scrollLeft = ta.scrollLeft;
+}
+
+const resizeObserver = new ResizeObserver(entries => {
+    for (let entry of entries) {
+        const id = entry.target.id.replace('track', '');
+        const bd = document.getElementById('backdrop' + id);
+        bd.style.width = entry.contentRect.width + 16 + 'px';
+        bd.style.height = entry.contentRect.height + 16 + 'px';
+    }
+});
+
+['1','2','3'].forEach(id => resizeObserver.observe(document.getElementById('track'+id)));
+
+class Parser {
+    constructor(input, baseMidi, trackId) {
+        this.input = input;
+        this.pos = 0;
+        this.baseMidi = baseMidi;
+        this.trackId = trackId;
+    }
+
+    peek(count = 0) { return this.input[this.pos + count] || ''; }
+    skipSpace() { while (/\s/.test(this.peek())) this.pos++; }
+    consume(count = 1) {
+        let s = '';
+        for(let i=0; i<count; i++) { s += this.input[this.pos] || ''; this.pos++; }
+        return s;
+    }
+    isDigit(char) { return /[0-9]/.test(char); }
+
+    parse() {
+        this.pos = 0;
+        return this.parseGroup(0, 0);
+    }
+
+    parseGroup(kOff, mOff) {
+        let events = [];
+        this.skipSpace();
+        while (this.pos < this.input.length) {
+            if (this.peek() === ')' || this.peek() === ']') return events;
+            let items = this.parseRecursiveItem(kOff, mOff);
+            if (items.length > 0) events = events.concat(items);
+            else { if (this.peek() === ')' || this.peek() === ']') return events; this.consume(); }
+            this.skipSpace();
+        }
+        return events;
+    }
+
+    parseRecursiveItem(kOff, mOff) {
+        this.skipSpace();
+        if (this.pos >= this.input.length) return [];
+
+        if (this.checkToken('r*')) {
+            this.consume(2);
+            let inner = this.parseRecursiveItem(kOff, mOff);
+            return [...inner, ...JSON.parse(JSON.stringify(inner))];
+        }
+
+        if (this.checkToken('i*')) {
+            this.consume(2);
+            let inner = this.parseRecursiveItem(kOff, mOff);
+            return inner.reverse();
+        }
+
+        let keyMod = this.checkKeyMod();
+        if (keyMod) {
+            this.consume(keyMod.length + 1);
+            return this.parseRecursiveItem(NOTES.indexOf(keyMod), mOff);
+        }
+
+        let modeMod = this.checkModeMod();
+        if (modeMod) {
+            this.consume(modeMod.length);
+            return this.parseRecursiveItem(kOff, mOff + (parseInt(modeMod.value) - 1));
+        }
+
+        let content = this.parseAtom(kOff, mOff);
+
+        this.skipSpace();
+        if (this.peek() === '/') {
+            this.consume();
+            let divStr = '';
+            while(this.isDigit(this.peek())) divStr += this.consume();
+            let div = parseInt(divStr) || 1;
+            content.forEach(e => e.duration = e.duration / div);
+        }
+        return content;
+    }
+
+    parseAtom(kOff, mOff) {
+        const char = this.peek();
+        if (char === '(') {
+            this.consume();
+            let group = this.parseGroup(kOff, mOff);
+            this.skipSpace();
+            if (this.peek() === ')') this.consume();
+            return group;
+        }
+        if (char === '[') {
+            const startIdx = this.pos;
+            this.consume();
+            let content = this.parseGroup(kOff, mOff);
+            this.skipSpace();
+            if (this.peek() === ']') this.consume();
+            let midis = [];
+            let maxD = 0;
+            content.forEach(c => { midis.push(...c.notes); if(c.duration > maxD) maxD = c.duration; });
+            let dur = maxD || 1;
+            while(this.peek() === '~') { this.consume(); dur += 1; }
+            return [{ notes: midis, duration: dur, range: [startIdx, this.pos], trackId: this.trackId }];
+        }
+        if (this.isDigit(char)) {
+            const startIdx = this.pos;
+            let n = parseInt(this.consume());
+            let dur = 1;
+            while(this.peek() === '~') { this.consume(); dur += 1; }
+            let midi = this.calcMidi(n, kOff, mOff);
+            return [{ notes: n === 0 ? [] : [midi], duration: dur, range: [startIdx, this.pos], trackId: this.trackId }];
+        }
+        return [];
+    }
+
+    checkToken(str) { return this.input.substr(this.pos, str.length) === str; }
+    checkKeyMod() {
+        const sorted = [...NOTES].sort((a,b) => b.length - a.length);
+        for(let k of sorted) if (this.checkToken(k + '*')) return k;
+        return null;
+    }
+    checkModeMod() {
+        if (this.isDigit(this.peek()) && this.peek(1) === '*') return { value: this.peek(), length: 2 };
+        if (this.isDigit(this.peek()) && this.peek(1) === '(') return { value: this.peek(), length: 1 };
+        return null;
+    }
+    calcMidi(n, kOff, mOff) {
+        let total = (n - 1) + mOff;
+        let oct = Math.floor(total / 7);
+        let deg = ((total % 7) + 7) % 7;
+        return this.baseMidi + kOff + MAJOR_SCALE_INTERVALS[deg] + (oct * 12);
+    }
+}
+
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+let schedulerID = null, visualID = null;
+let nextNoteTime = 0.0, currentEventIndex = 0;
+let globalEvents = [], isPlaying = false, isRepeat = false;
+
+function compile() {
+    try {
+        const bpm = parseInt(document.getElementById('bpm').value) || 120;
+        const beatDur = 30 / bpm; 
+        const tracks = ['1','2','3'].map(id => new Parser(document.getElementById('track'+id).value, Object.values(BASE_MIDI)[id-1], id).parse());
+        let timeline = [];
+        tracks.forEach(tEvs => {
+            let cur = 0;
+            tEvs.forEach(e => {
+                timeline.push({ ...e, absTimeSec: cur * beatDur, durSec: e.duration * beatDur, time: cur });
+                cur += e.duration;
+            });
+        });
+        updateStatus("ready");
+        return timeline.sort((a, b) => a.absTimeSec - b.absTimeSec);
+    } catch(e) {
+        updateStatus("syntax error", "#d32f2f");
+        return [];
+    }
+}
+
+// ELECTRIC GUITAR CLEAN SYNTH
+function playNote(midi, time, dur) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    const filter = audioCtx.createBiquadFilter();
+    
+    // Square wave gives that harmonically rich "clean electric" base
+    osc.type = 'square';
+    osc.frequency.value = 440 * Math.pow(2, (midi - 69) / 12);
+    
+    // Filter to warm up the tone
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(1500, time);
+    filter.frequency.exponentialRampToValueAtTime(800, time + dur);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+    
+    // Guitar Pluck Envelope
+    gain.gain.setValueAtTime(0, time);
+    gain.gain.linearRampToValueAtTime(0.08, time + 0.005); // Sharp Attack
+    gain.gain.exponentialRampToValueAtTime(0.001, time + dur + 0.5); // Long Decay
+    
+    osc.start(time);
+    osc.stop(time + dur + 0.6);
+}
+
+function startPlayback() {
+    if (isPlaying) stopPlayback();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    globalEvents = compile();
+    if (globalEvents.length === 0) return;
+    
+    isPlaying = true; 
+    currentEventIndex = 0;
+    nextNoteTime = audioCtx.currentTime + 0.1;
+    updateStatus("playing...", "#4caf50");
+    
+    schedulerID = requestAnimationFrame(scheduler);
+    visualID = requestAnimationFrame(visualizer);
+    document.getElementById('playBtn').classList.add('active');
+}
+
+function scheduler() {
+    if (!isPlaying) return;
+    while (currentEventIndex < globalEvents.length && globalEvents[currentEventIndex].absTimeSec + nextNoteTime < audioCtx.currentTime + 0.1) {
+        let ev = globalEvents[currentEventIndex];
+        ev.notes.forEach(n => playNote(n, nextNoteTime + ev.absTimeSec, ev.durSec));
+        currentEventIndex++;
+    }
+    if (currentEventIndex >= globalEvents.length) {
+        let last = globalEvents[globalEvents.length-1];
+        let end = nextNoteTime + last.absTimeSec + last.durSec;
+        if (audioCtx.currentTime > end) {
+            if (isRepeat) { currentEventIndex = 0; nextNoteTime = audioCtx.currentTime + 0.1; }
+            else stopPlayback();
+        }
+    }
+    schedulerID = requestAnimationFrame(scheduler);
+}
+
+function visualizer() {
+    if (!isPlaying) return;
+    const now = audioCtx.currentTime - nextNoteTime;
+    const active = { '1': new Set(), '2': new Set(), '3': new Set() };
+    globalEvents.forEach(ev => {
+        if (now >= ev.absTimeSec && now < ev.absTimeSec + ev.durSec) {
+            for(let i=ev.range[0]; i<ev.range[1]; i++) active[ev.trackId].add(i);
+        }
+    });
+    ['1','2','3'].forEach(id => {
+        const text = document.getElementById('track'+id).value;
+        let html = '';
+        for(let i=0; i<text.length; i++) html += active[id].has(i) ? `<mark>${text[i]}</mark>` : text[i];
+        document.getElementById('backdrop'+id).innerHTML = html;
+    });
+    visualID = requestAnimationFrame(visualizer);
+}
+
+function stopPlayback() {
+    isPlaying = false;
+    cancelAnimationFrame(schedulerID); cancelAnimationFrame(visualID);
+    document.getElementById('playBtn').classList.remove('active');
+    updateStatus("stopped");
+    ['1','2','3'].forEach(id => document.getElementById('backdrop'+id).innerHTML = document.getElementById('track'+id).value);
+}
+
+document.getElementById('pauseBtn').onclick = () => { isPlaying = false; updateStatus("Paused", "#ffa000"); };
+document.getElementById('track1').addEventListener('input', () => updateStatus("modified"));
+document.getElementById('track2').addEventListener('input', () => updateStatus("modified"));
+document.getElementById('track3').addEventListener('input', () => updateStatus("modified"));
+
+['1','2','3'].forEach(id => {
+    document.getElementById('track'+id).addEventListener('input', e => document.getElementById('backdrop'+id).innerHTML = e.target.value);
+});
+document.getElementById('playBtn').onclick = startPlayback;
+document.getElementById('stopBtn').onclick = stopPlayback;
+document.getElementById('repeatBtn').onclick = e => {
+    isRepeat = !isRepeat;
+    e.target.innerText = isRepeat ? "repeat: on" : "repeat: off";
+    e.target.style.color = isRepeat ? "#4caf50" : "";
+};
+</script>
+</body>
+</html>
