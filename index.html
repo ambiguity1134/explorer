@@ -141,6 +141,88 @@
             display: flex;
             gap: 5px;
         }
+		
+		.notes-wrapper {
+    width: 100%;
+    margin-top: -10px;
+}
+
+	#notesToggle {
+		background: none;
+		border: none;
+		padding: 0;
+		font-family: inherit;
+		font-size: 0.85em;
+		color: #666;
+		cursor: pointer;
+		text-align: left;
+	}
+
+	#notesToggle:hover {
+		color: #000;
+	}
+
+	.notes-content {
+		margin-top: 6px;
+	}
+
+	.notes-content textarea {
+		width: 100%;
+		min-height: 80px;
+		resize: vertical;
+		background: #fff;
+		color: #000;
+		border: 1px solid #ccc;
+		padding: 8px;
+		font-family: 'Ubuntu Mono', monospace;
+		font-size: 14px;
+		box-sizing: border-box;
+	}
+
+	.hidden {
+		display: none;
+	}
+	
+	.syntax-help-wrapper {
+    width: 100%;
+    margin-top: -10px;
+	margin-bottom: 40px;
+}
+
+	#syntaxHelpToggle {
+		background: none;
+		border: none;
+		padding: 0;
+		font-family: inherit;
+		font-size: 0.85em;
+		color: #666;
+		cursor: pointer;
+		text-align: left;
+	}
+
+	#syntaxHelpToggle:hover {
+		color: #000;
+	}
+
+	.syntax-help-content {
+		margin-top: 6px;
+	}
+
+	.syntax-help-text {
+		font-size: 0.85em;
+		color: #333;
+		background: #f9f9f9;
+		border: 1px solid #ccc;
+		padding: 8px;
+		font-family: 'Ubuntu Mono', monospace;
+		line-height: 0.5;
+		white-space: pre-wrap;
+	}
+
+	.hidden {
+		display: none;
+	}
+	
     </style>
 </head>
 <body>
@@ -184,6 +266,68 @@
         </div>
 
         <div class="status-bar" id="status">ready</div>
+		
+		<div class="notes-wrapper">
+			<button id="notesToggle">notepad▾</button>
+			<div id="notesContent" class="notes-content hidden">
+				<textarea id="notes" placeholder="blah blah blah blah..." spellcheck="false"></textarea>
+			</div>
+		</div>
+		
+		<div class="syntax-help-wrapper">
+			<button id="syntaxHelpToggle">syntax-help ▾</button>
+			<div id="syntaxHelpContent" class="syntax-help-content hidden">
+				<div class="syntax-help-text">
+recognized keys (k): <br>
+  <em>default = C</em><br>
+  C C# D Eb E F F# G Ab A Bb B <br>
+<br>
+recognized modes (m): <br>
+  <em>default = 1 AKA Major</em><br>
+  1 2 3 4 5 6 7 <br>
+<br>
+recognized notes (n): <br>
+  1 2 3 4 5 6 7 8 9 <br>
+  <em>octave higher relative to 1: 8 = 1, 9 = 2</em><br>
+  0 = rest <br>
+<br>
+Recognized divisions (d): <br>
+  3 = triplets<br>
+  5 = quintuplets<br>
+  7 = septuplets<br>
+<br>
+recognized symbols and functions: <br>
+<br>
+~<br>
+  extends the length of a beat by an eighth note<br>
+<br>
+*()<br>
+  modifier symbol<br>
+<br>
+[]<br>
+  denotes a chord - play contents simultaneously at same beat<br>
+<br>
+m*()<br>
+  diatonic transpose AKA change parallel mode <br>
+<br>
+k*()<br>
+  chromatic transpose AKA change key<br>
+<br>
+km*()<br>
+  transposing with both key and mode parameters:<br>
+<br>
+r*() <br>
+  repeat once <br>
+<br>
+i*() <br>
+  play in reverse AKA backwards<br>
+<br>
+()/d<br>
+  set irregular divisions <br>
+				</div>
+			</div>
+		</div>
+
     </div>
 
 <script>
@@ -457,6 +601,65 @@ function stopPlayback() {
     ['1','2','3'].forEach(id => document.getElementById('backdrop'+id).innerHTML = document.getElementById('track'+id).value);
 }
 
+// --- IMPROVED LIVE PREVIEW LOGIC ---
+function livePreview(trackId, textarea, inputType) {
+    // 1. Ignore backspaces/deletions
+    if (inputType === 'deleteContentBackward' || inputType === 'deleteContentForward') return;
+
+    const pos = textarea.selectionStart;
+    const text = textarea.value;
+    const char = text[pos - 1];
+
+    // 2. Only trigger if the last typed char is a note (1-9)
+    if (/[1-9]/.test(char)) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+
+        const baseMidi = Object.values(BASE_MIDI)[parseInt(trackId) - 1];
+        const textBefore = text.substring(0, pos);
+        
+        // 3. Robust Lookback for Modifiers
+        let kOff = 0;
+        let mOff = 0;
+
+        // Find the nearest Key (e.g., "G*", "Eb*")
+        const keyRegex = /([A-G][b#]?)\*/g;
+        let keyMatch;
+        while ((keyMatch = keyRegex.exec(textBefore)) !== null) {
+            kOff = NOTES.indexOf(keyMatch[1]);
+        }
+
+        // Find the nearest Mode (e.g., "2*", "3(")
+        const modeRegex = /([1-7])[\*\(]/g;
+        let modeMatch;
+        while ((modeMatch = modeRegex.exec(textBefore)) !== null) {
+            mOff = parseInt(modeMatch[1]) - 1;
+        }
+
+        // 4. Calculate and Play
+        const tempParser = new Parser('', baseMidi, trackId);
+        const noteVal = parseInt(char);
+        const midi = tempParser.calcMidi(noteVal, kOff, mOff);
+        
+        playNote(midi, audioCtx.currentTime, 0.3);
+    }
+}
+
+// --- UPDATED EVENT LISTENERS ---
+['1', '2', '3'].forEach(id => {
+    const el = document.getElementById('track' + id);
+    
+    el.addEventListener('input', (e) => {
+        // Update syntax highlighting
+        document.getElementById('backdrop' + id).innerHTML = e.target.value;
+        updateStatus("modified");
+        
+        // Trigger live preview with inputType check
+        livePreview(id, e.target, e.inputType);
+    });
+
+    el.addEventListener('scroll', () => syncScroll(id));
+});
+
 document.getElementById('pauseBtn').onclick = () => { isPlaying = false; updateStatus("Paused", "#ffa000"); };
 document.getElementById('track1').addEventListener('input', () => updateStatus("modified"));
 document.getElementById('track2').addEventListener('input', () => updateStatus("modified"));
@@ -472,6 +675,23 @@ document.getElementById('repeatBtn').onclick = e => {
     e.target.innerText = isRepeat ? "repeat: on" : "repeat: off";
     e.target.style.color = isRepeat ? "#4caf50" : "";
 };
+
+const notesToggle = document.getElementById('notesToggle');
+const notesContent = document.getElementById('notesContent');
+
+notesToggle.addEventListener('click', () => {
+    const isHidden = notesContent.classList.toggle('hidden');
+    notesToggle.textContent = isHidden ? 'notes ▾' : 'notes ▴';
+});
+
+const syntaxToggle = document.getElementById('syntaxHelpToggle');
+const syntaxContent = document.getElementById('syntaxHelpContent');
+
+syntaxToggle.addEventListener('click', () => {
+    const hidden = syntaxContent.classList.toggle('hidden');
+    syntaxToggle.textContent = hidden ? 'syntax-help ▾' : 'syntax-help ▴';
+});
+
 </script>
 </body>
 </html>
